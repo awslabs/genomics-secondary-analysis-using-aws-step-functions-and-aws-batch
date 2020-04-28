@@ -1,0 +1,93 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Use CodeBuild to build container images
+
+Parameters:
+  Project:
+    Type: String
+  
+  ImageName:
+    Type: String
+  
+  ImageTag:
+    Type: String
+    Description: >
+      Tag to apply to the container image. This is typically the version of
+      the software being containerized.
+
+  BuildSpec:
+    Type: String
+    Description: >
+      Relative path in the project source to the buildspec.yml file (or equivalent).
+  
+  ProjectPath:
+    Type: String
+    Description: >
+      Relative path in the project source to navigate to prior to building the
+      container
+
+  CodeBuildRoleArn:
+    Type: String
+  
+  UseProjectPrefix:
+    Type: String
+    Description: >
+      Use the lowercase value of the project name as a prefix to the image name.
+      This is useful if you have multiple projects that use the same base
+      container images but each project has different development life cycles.
+    Default: "yes"
+    AllowedValues:
+      - "yes"
+      - "no"
+
+Conditions:
+  UseProjectPrefix:
+    Fn::Equals:
+      - !Ref UseProjectPrefix
+      - "yes"
+
+Resources:
+  BuildProject:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Description: !Sub "${Project} - ${ImageName} container image"
+      Source: #required
+        Type: CODEPIPELINE
+        BuildSpec: !Ref BuildSpec
+      Name: !Sub ${Project}-container-${ImageName}
+      Artifacts: #required
+        Type: CODEPIPELINE
+      ServiceRole: !Ref CodeBuildRoleArn  #required
+      Environment: #required
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_LARGE  # speeds up container builds
+        PrivilegedMode: True  # required to build containers
+        Image: aws/codebuild/standard:1.0
+        EnvironmentVariables:
+          - Name: REGISTRY
+            Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com"
+
+          - Name: IMAGE_NAME
+            Value:
+              Fn::If:
+                - UseProjectPrefix
+                - !Sub ${Project}-${ImageName}
+                - !Ref ImageName
+          - Name: IMAGE_TAG
+            Value: !Ref ImageTag
+          - Name: PROJECT_PATH
+            Value: !Ref ProjectPath
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: Artifact outputs are encrypted by default
+
+Outputs:
+  Name:
+    Value: !Ref BuildProject
+  
+  Arn:
+    Value: !GetAtt BuildProject.Arn
+...

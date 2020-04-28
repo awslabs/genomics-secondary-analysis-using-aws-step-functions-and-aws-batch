@@ -1,0 +1,413 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines IAM roles for CI/CD pipeline
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Resources:
+
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+      Policies:
+        - PolicyName: CloudFormationRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - batch:DescribeComputeEnvironments
+                  - batch:DescribeJobDefinitions
+                  - batch:DescribeJobQueues
+                  - batch:CreateComputeEnvironment
+                  - batch:UpdateComputeEnvironment
+                  - batch:DeleteComputeEnvironment
+                  - batch:CreateJobQueue
+                  - batch:UpdateJobQueue
+                  - batch:DeleteJobQueue
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - batch:RegisterJobDefinition
+                  - batch:DeregisterJobDefinition
+                Resource:
+                  - !Sub arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/${Project}*
+                  - !Sub arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/${ProjectLowerCase}*
+              - Effect: Allow
+                Action:
+                  - ec2:DeleteInternetGateway
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+              - Effect: Allow
+                Action:
+                  - ec2:AssociateSubnetCidrBlock
+                  - ec2:AssociateRouteTable
+                  - ec2:AttachInternetGateway
+                  - ec2:CreateVpc
+                  - ec2:CreateInternetGateway
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateRouteTable
+                  - ec2:CreateSubnet
+                  - ec2:DeleteSubnet
+                  - ec2:DeleteVpc
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeVpcAttribute
+                  - ec2:DescribeAccountAttributes
+                  - ec2:DescribeSubnets
+                  - ec2:DetachInternetGateway
+                  - ec2:DisassociateRouteTable
+                  - ec2:ModifySubnetAttribute
+                  - ec2:ModifyVpcAttribute
+                  - ec2:CreateLaunchTemplate
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:allocateAddress
+                  - ec2:DescribeAddresses
+                  - ec2:AssociateAddress
+                  - ec2:DisassociateAddress
+                  - ec2:ReleaseAddress
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:DeleteSecurityGroup
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateRoute
+                  - ec2:DeleteRouteTable
+                  - ec2:DeleteRoute
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DescribeTags
+                  - ec2:DeleteTags
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:dhcp-options/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+              - Effect: Allow
+                Action:
+                  - ec2:DeleteVpcEndpoints
+                  - ec2:CreateVpcEndpoint
+                  - ec2:ModifyVpcEndpoint
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc-endpoint/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcEndpointServices
+                  - ec2:DescribeVpcEndpoints
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNatGateway
+                  - ec2:DeleteNatGateway
+                  - ec2:DescribeNatGateways
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DeleteLaunchTemplate
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:DeleteLaunchTemplateVersions
+                  - ec2:CreateLaunchTemplateVersion
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+              - Effect: Allow
+                Action:
+                  - iam:GetRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PassRole
+                  - iam:GetRole
+                  - iam:GetInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/${Project}*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:ListBucket
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketLogging
+                  - s3:PutBucketAcl
+                Resource:
+                  - !Sub arn:aws:s3:::${ProjectLowerCase}code*
+                  - !Sub arn:aws:s3:::${ProjectLowerCase}code*/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - S3:PutObject
+                Resource:
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZONE_BUCKET}"
+                      - ZONE_BUCKET:
+                          Fn::ImportValue:
+                            !Sub ${ZoneStackName}-ZoneBucket
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZONE_BUCKET}/*"
+                      - ZONE_BUCKET:
+                          Fn::ImportValue:
+                            !Sub ${ZoneStackName}-ZoneBucket
+              - Effect: Allow
+                Action:
+                  - states:DescribeStateMachine
+                  - states:CreateStateMachine
+                  - states:UpdateStateMachine
+                  - states:DeleteStateMachine
+                  - states:TagResource
+                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutDashboard
+                  - cloudwatch:GetDashboard
+                  - cloudwatch:DeleteDashboards
+                Resource:
+                  - !Sub arn:aws:cloudwatch::${AWS::AccountId}:dashboard/${Project}
+                  - !Sub arn:aws:cloudwatch::${AWS::AccountId}:dashboard/*
+              - Effect: Allow
+                Action:
+                  - cloudwatch:ListDashboards
+                Resource: '*'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: AWS Batch requires * resources. cloudwatchL:ListDashboards and 30 ec2 actions require * for resources.
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Policies:
+        - PolicyName: CodeBuildServiceRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${Project}*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${Project}*:*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectLowerCase}*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectLowerCase}*:*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:DeleteObject
+                Resource:
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZoneBucket}"
+                      - ZoneBucket:
+                          Fn::ImportValue: !Sub ${ZoneStackName}-ZoneBucket
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZoneBucket}/*"
+                      - ZoneBucket:
+                          Fn::ImportValue: !Sub ${ZoneStackName}-ZoneBucket
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:DescribeRepositories
+                  - ecr:DescribeImages
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:BatchGetImage
+                  - ecr:BatchDescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:PutLifecyclePolicy
+                Resource:
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectLowerCase}*
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Need * for GetAuthorizationToken.
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                Effect: Allow
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${Project}Code/*
+        - PolicyName: IamAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource: !Sub ${CloudFormationRole.Arn}
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:DeleteObject
+                  - s3:PutObject
+                Resource:
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZoneBucket}"
+                      - ZoneBucket:
+                          Fn::ImportValue: !Sub ${ZoneStackName}-ZoneBucket
+                  - Fn::Sub:
+                      - "arn:aws:s3:::${ZoneBucket}/*"
+                      - ZoneBucket:
+                          Fn::ImportValue: !Sub ${ZoneStackName}-ZoneBucket
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                  - !Sub "arn:aws:codebuild:*:*:project/${Project}*"
+                  - !Sub "arn:aws:codebuild:*:*:project/${ProjectLowerCase}*"
+        - PolicyName: CodeCommitAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codecommit:UploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetUploadArchiveStatus
+                Resource:
+                  - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Project}*
+                  - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${ProjectLowerCase}*
+
+  SourceEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: IAM role to allow Amazon CloudWatch Events to trigger AWS CodePipeline execution
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Sid: 1
+      Policies:
+        - PolicyName: CloudWatchEventPolicy
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - codepipeline:StartPipelineExecution
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Project}*
+                  - !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectLowerCase}*
+
+Outputs:
+  CloudFormationRoleArn:
+    Value: !GetAtt CloudFormationRole.Arn
+  CodeBuildRoleArn:
+    Value: !GetAtt CodeBuildRole.Arn
+  CodePipelineRoleArn:
+    Value: !GetAtt CodePipelineRole.Arn
+  SourceEventRoleArn:
+    Value: !GetAtt SourceEventRole.Arn
+  

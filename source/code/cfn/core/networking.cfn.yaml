@@ -1,0 +1,216 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines AWS networking resources for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # this public subnet is only needed for the NAT Gateway
+  SubnetPublic1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 0, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      #MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Public-1
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: MapPublicIpOnLaunch needed for AWS Batch.
+
+  SubnetPrivate1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 1, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-1
+
+  SubnetPrivate2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 2, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-2
+
+  EIPNatGateway:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  NatGateway:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt EIPNatGateway.AllocationId #required
+      SubnetId: !Ref SubnetPublic1 #required
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Public
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private
+  
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+  
+  PrivateRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref PrivateRouteTable
+      
+  SubnetPublic1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SubnetPublic1
+
+  SubnetPrivate1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate1
+
+  SubnetPrivate2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate2
+
+  # Use a VPC Gateway Endpoint for S3 so that requests for data do not route over the public internet
+  S3VpcEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3 #required
+      VpcId: !Ref VPC #required
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AWS Batch Launched Instances.
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic for updates.
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W40
+            reason: Allow all outbound traffic for updates.
+          - id: W5
+            reason: Allow all outbound traffic for updates.
+          - id: W42
+            reason: Allow self-ingress on all ports for inter-node communication
+  
+  # this ingress rule is needed if you have tightly coupled multi-node workloads
+  # or if you are using a parallel filesystem
+  SecurityGroupSelfIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      Description: Allow instances in the same security group to communicate
+      IpProtocol: "-1" #required
+      GroupId: !Ref SecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W42
+            reason: Allow self-ingress on all ports for inter-node communication
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  PublicSubNetIds:
+    Value: !Sub "${SubnetPublic1}"
+  PrivateSubnetIds:
+    Value: !Sub "${SubnetPrivate1}, ${SubnetPrivate2}"
+  SecurityGroupIds:
+    Value: !Sub ${SecurityGroup}
+...

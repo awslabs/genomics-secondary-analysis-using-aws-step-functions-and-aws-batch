@@ -1,0 +1,410 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  (SO0076) - Genomics-secondary-analysis-using-aws-step-functions-and-aws-batch: - This solution provides a Next 
+  Generation Sequencing (NGS) genomics secondary-analysis pipeline using AWS Step Functions and AWS Batch. We 
+  demonstrate how to monitor workflow status, fail-over to on-demand, handle errors, optimize for cost, secure data with
+  least-privileges, monitor pipeline performance and respond to issues using AWS CloudWatch.
+
+Mappings:
+  Send:
+    AnonymousUsage:
+      Data: Yes
+  SourceCode:
+    General:
+      S3Bucket: '%%BUCKET_NAME%%'
+      KeyPrefix: '%%SOLUTION_NAME%%/%%VERSION%%'
+
+Parameters:
+  Project:
+    Type: String
+    Description: >
+      Name of the project this solution will be used for. Should be 3-24 characters in length, and only have alphanumeric
+      characters and hyphens ([a-zA-Z0-9-]{3,32}).  This will be used to prefix resources created by this solution.
+      Note, lowercase form will be generated and used as well where appropriate.
+    AllowedPattern: "[a-zA-Z0-9-]{3,24}"
+    ConstraintDescription: >
+      Project name should be 3-24 characters in length, and only have alphanumeric characters and hyphens ([a-zA-Z0-9-]{3,32})
+    Default: GenomicsWorkflow
+  
+  SmokeTest:
+    Type: String
+    AllowedValues:
+      - "Yes"
+      - "No"
+    Default: "No"
+    Description: >
+      Run a smoke test of the solution using an example workflow and example data to ensure that the solution is
+      correctly installed and functional in your environment.
+
+Conditions:
+  RunSmokeTest: !Equals [ !Ref SmokeTest, "Yes" ]
+
+Resources:
+  Setup:
+    Type: Custom::Setup
+    DependsOn:
+      - CodeBuild
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub ${SetupLambda.Arn}
+      CodeBuildProjectName: !Sub ${CodeBuild}
+
+  SetupLambda:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - SetupLambdaRole
+    Properties:
+      Handler: lambda.handler
+      Runtime: python3.8
+      FunctionName: !Sub ${Project}Setup
+      Code:
+        S3Bucket: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], Ref: "AWS::Region"]]
+        S3Key: !Join ["", [!FindInMap ["SourceCode", "General", "KeyPrefix"], "/SetupLambdaBundle.zip"]]
+      Role: !Sub ${SetupLambdaRole.Arn}
+      Timeout: 600
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: Bug in CfnNag.
+
+  SetupLambdaRole:
+    Type: AWS::IAM::Role
+    DependsOn:
+      - CodeBuild
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: LogsAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Project}*
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetProjects
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource:
+                  - !Sub ${CodeBuild.Arn}
+        - PolicyName: EventsAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:DeleteRule
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource:
+                  - !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/Setup*
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Project}*
+
+  CodeBuildRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Principal:
+                Service:
+                  - codebuild.amazonaws.com
+        Path: /
+        Policies:
+          - PolicyName: CloudFormationAccess
+            PolicyDocument:
+              Statement:
+                - Action:
+                    - cloudformation:CreateStack
+                    - cloudformation:DescribeStacks
+                    - cloudformation:UpdateStack
+                    - cloudformation:DeleteStack
+                    - cloudformation:UpdateTerminationProtection
+                    - cloudformation:ListStackResources
+                  Effect: Allow
+                  Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${Project}*
+          - PolicyName: LogsAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${Project}*
+          - PolicyName: IAMAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - iam:GetRolePolicy
+                    - iam:CreateRole
+                    - iam:DeleteRole
+                    - iam:PutRolePolicy
+                    - iam:DeleteRolePolicy
+                    - iam:AttachRolePolicy
+                    - iam:DetachRolePolicy
+                    - iam:UpdateAssumeRolePolicy
+                    - iam:PassRole
+                    - iam:GetRole
+                    - iam:GetInstanceProfile
+                    - iam:CreateInstanceProfile
+                    - iam:DeleteInstanceProfile
+                    - iam:AddRoleToInstanceProfile
+                    - iam:RemoveRoleFromInstanceProfile
+                  Resource:
+                    - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}*
+                    - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/${Project}*
+          - PolicyName: CodeBuildAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - codebuild:CreateProject
+                    - codebuild:UpdateProject
+                    - codebuild:ListProjects
+                    - codebuild:BatchGetProjects
+                    - codebuild:DeleteProject
+                  Resource:
+                    - !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Project}*
+          - PolicyName: CodePipelineAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - codepipeline:CreatePipeline
+                    - codepipeline:GetPipeline
+                    - codepipeline:UpdatePipeline
+                    - codepipeline:DeletePipeline
+                    - codepipeline:GetPipelineState
+                  Resource:
+                    - !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Project}*
+          - PolicyName: CodeCommitAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - codecommit:CreateBranch
+                    - codecommit:CreateRepository
+                    - codecommit:GetRepository
+                    - codecommit:DeleteRepository
+                    - codecommit:CreateCommit
+                    - codecommit:GitPush
+                    - codecommit:GitPull
+                    - codecommit:DeleteBranch
+                  Resource:
+                    - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Project}*
+                - Effect: Allow
+                  Action:
+                    - codecommit:ListRepositories
+                  Resource: "*"
+          - PolicyName: EventsAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - events:DescribeRule
+                    - events:PutRule
+                    - events:DeleteRule
+                    - events:PutTargets
+                    - events:RemoveTargets
+                  Resource:
+                    - !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/*
+          - PolicyName: S3Access
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    !Join
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !FindInMap ["SourceCode", "General", "S3Bucket"]
+                        - '/*'
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    !Join
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !Join
+                            - '-'
+                            - - !FindInMap ["SourceCode", "General", "S3Bucket"]
+                              - Ref: "AWS::Region"
+                        - '/'
+                        - !FindInMap ["SourceCode", "General", "KeyPrefix"]
+                        - '/*'
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                  Resource:
+                    !Join
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !FindInMap ["SourceCode", "General", "S3Bucket"]
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                    - s3:ListBucket
+                    - s3:CreateBucket
+                    - s3:DeleteBucket
+                    - s3:PutEncryptionConfiguration
+                    - s3:PutBucketPublicAccessBlock
+                    - s3:PutBucketLogging
+                    - s3:PutBucketAcl
+                  Resource:
+                    - arn:aws:s3:::*zone*
+                    - arn:aws:s3:::*zone*/*
+                    - arn:aws:s3:::*pipe*
+                    - arn:aws:s3:::*pipe*/*
+                    - arn:aws:s3:::*code*
+                    - arn:aws:s3:::*code*/*
+          - PolicyName: ECRAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ecr:DescribeRepositories
+                    - ecr:BatchGetImage
+                    - ecr:DescribeImages
+                    - ecr:DescribeRepositories
+                    - ecr:ListTagsForResource
+                    - ecr:BatchDeleteImage
+                    - ecr:ListImages
+                    - ecr:DeleteRepositoryPolicy
+                    - ecr:DeleteLifecyclePolicy
+                    - ecr:DeleteRepository
+                    - ecr:GetRepositoryPolicy
+                    - ecr:GetLifecyclePolicy
+                  Resource:
+                    - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*
+          - PolicyName: SfnAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - states:DescribeStateMachine
+                    - states:DescribeExecution
+                    - states:ListExecutions
+                    - states:StartExecution
+                    - states:StopExecution
+                  Resource: 
+                    - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${Project}*
+                    - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${Project}*:*
+                - Effect: Allow
+                  Action:
+                    - states:ListStateMachines
+                  Resource: "*"
+          - PolicyName: BatchAcccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - batch:DescribeComputeEnvironments
+                  Resource: "*"
+          - PolicyName: EC2AutoScalingAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - autoscaling:DeleteAutoScalingGroup
+                  Resource:
+                    - !Sub arn:aws:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/*SpotEnv*
+                    - !Sub arn:aws:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/*OnDemandEnv*
+                - Effect: Allow
+                  Action:
+                    - autoscaling:DescribeAutoScalingGroups
+                  Resource: "*"
+
+      Metadata:
+        cfn_nag:
+          rules_to_suppress:
+            - id: W11
+              reason: all resources required for codecommit:ListRepositories
+            - id: W11
+              reason: all resources required for states:ListStateMachines
+            - id: W11
+              reason: all resources required for autoscalilng:DescribeAutoScalingGroups
+            - id: W11
+              reason: all resources required for batch:DescribeComputeEnvironments
+  
+  CodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${Project}-Setup
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - git config --global user.name automated_user
+                - git config --global user.email automated_email
+                - aws s3 cp s3://$ARTIFACT_BUCKET/$ARTIFACT_KEY_PREFIX/Solution.zip .
+                - unzip Solution.zip
+                - ./setup/$SOLUTION_ACTION.sh
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: SOLUTION_ACTION
+            Value: setup
+          - Name: PROJECT_NAME
+            Value: !Ref Project
+          - Name: ARTIFACT_BUCKET
+            Value: !Join ["-", [!FindInMap ["SourceCode", "General", "S3Bucket"], Ref: "AWS::Region"]]
+          - Name: ARTIFACT_KEY_PREFIX
+            Value: !FindInMap ["SourceCode", "General", "KeyPrefix"]
+          - Name: SMOKE_TEST
+            Value:
+              Fn::If:
+                - RunSmokeTest
+                - "1"
+                - ""
+        Image: aws/codebuild/standard:3.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Sub ${CodeBuildRole}
+      TimeoutInMinutes: 90
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: Customer can enable encryption if desired.
+...

@@ -1,0 +1,169 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines IAM roles for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  SamplesBucket:
+    Description: S3 bucket that stores demo samples to be processed
+    Type: String
+  JobResultsBucket:
+    Description: S3 bucket that stores demo samples to be processed
+    Type: String
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+  BatchInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}
+                  - !Sub arn:aws:s3:::${JobResultsBucket}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                Resource:
+                  - arn:aws:s3:::broad-references
+                  - arn:aws:s3:::broad-references/*
+                  - !Sub arn:aws:s3:::${SamplesBucket}
+                  - !Sub arn:aws:s3:::${SamplesBucket}/*
+        - PolicyName: EBS-Access  # permissions for amazon-ebs-autoscale on instances
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ec2:createVolume"
+                  - "ec2:attachVolume"
+                  - "ec2:deleteVolume"
+                  - "ec2:modifyInstanceAttribute"
+                  - "ec2:describeVolumes"
+                Resource:
+                  - arn:aws:ec2::*:volume/*
+                  - arn:aws:ec2::*:instance/*
+
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  BatchInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BatchInstanceRole
+      InstanceProfileName: !Ref BatchInstanceRole
+
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - spotfleet.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - batch.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+
+  StatesExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: BatchAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - batch:SubmitJob
+                  - batch:DescribeJobs
+                  - batch:TerminateJob
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource:
+                  - !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForBatchJobsRule
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Resources-level permissions are not available for Batch resources.
+  
+Outputs:
+  BatchServiceRoleArn:
+    Value: !GetAtt BatchServiceRole.Arn
+  BatchInstanceProfileArn:
+    Value: !GetAtt BatchInstanceProfile.Arn
+  SpotFleetRoleArn:
+    Value: !GetAtt SpotFleetRole.Arn
+  StatesExecutionRoleArn:
+    Value: !GetAtt StatesExecutionRole.Arn
+...

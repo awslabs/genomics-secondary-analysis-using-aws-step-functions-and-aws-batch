@@ -1,0 +1,238 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  (SO0076) - Genomics-secondary-analysis-using-aws-step-functions-and-aws-batch: Workflow Code.
+  Defines AWS resources and workflow definitions for secondary analysis pipelines
+
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  SamplesBucket:
+    Description: S3 bucket that stores demo samples to be processed
+    Type: String
+  SamplesPrefix:
+    Description: S3 key that stores demo samples to be processed
+    Type: String
+    Default: samples
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+
+Resources:
+
+  # S3 bucket used to store intermediate and final results from workflows
+  JobResultsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      LoggingConfiguration:
+        DestinationBucketName:
+          Fn::ImportValue: !Sub ${ZoneStackName}-LogsBucket
+        LogFilePrefix: job_results_logs/
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W51
+            reason: Bucket policy is not needed.
+
+  # Core networking stack.
+  # Creates a VPC, subnets, and security groups
+  Networking:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref Project
+        ProjectLowerCase: !Ref ProjectLowerCase
+        ZoneStackName: !Ref ZoneStackName
+      TemplateURL:
+        Fn::Sub:
+          - "${TemplateRootUrl}/core/networking.cfn.yaml"
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/code"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  # Core IAM stack.
+  # Creates all IAM roles used to execute workflows with AWS Batch and AWs Step Functions
+  IamRoles:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref Project
+        ProjectLowerCase: !Ref ProjectLowerCase
+        SamplesBucket: !Ref SamplesBucket
+        JobResultsBucket: !Ref JobResultsBucket
+        ZoneStackName: !Ref ZoneStackName
+      TemplateURL:
+        Fn::Sub:
+          - "${TemplateRootUrl}/core/iam.cfn.yaml"
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/code"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  # Core Batch stack.
+  # Creates AWS Batch resources for job execution (Compute Environments and Job Queues)
+  Batch:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref Project
+        ProjectLowerCase: !Ref ProjectLowerCase
+        BatchServiceRoleArn: !GetAtt IamRoles.Outputs.BatchServiceRoleArn
+        BatchInstanceProfileArn: !GetAtt IamRoles.Outputs.BatchInstanceProfileArn
+        SpotFleetRoleArn: !GetAtt IamRoles.Outputs.SpotFleetRoleArn
+        SubnetIds: !GetAtt Networking.Outputs.PrivateSubnetIds  # launch in private subnets for extra security
+        SecurityGroupIds: !GetAtt Networking.Outputs.SecurityGroupIds
+        ZoneStackName: !Ref ZoneStackName
+      TemplateURL:
+        Fn::Sub:
+          - "${TemplateRootUrl}/core/batch.cfn.yaml"
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/code"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  # === JOB DEFINITIONS ===
+  # Creates Batch Job Definitions for tooling used by workflows.
+  # Add additional Batch Job Definitions here for any new tools.
+  BatchJobDefinitionBwa:
+    Type: "AWS::Batch::JobDefinition"
+    Properties:
+      JobDefinitionName: !Sub ${ProjectLowerCase}-bwa
+      Type: container #required
+      ContainerProperties:
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectLowerCase}-bwa
+        Vcpus: 8
+        Memory: 16000
+        Volumes:
+          - Host:
+              SourcePath: /opt/miniconda
+            Name: awscli
+        MountPoints:
+          - ContainerPath: /opt/miniconda
+            SourceVolume: awscli
+  
+  BatchJobDefinitionSamtools:
+    Type: "AWS::Batch::JobDefinition"
+    Properties:
+      JobDefinitionName: !Sub ${ProjectLowerCase}-samtools
+      Type: container #required
+      ContainerProperties:
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectLowerCase}-samtools
+        Vcpus: 8
+        Memory: 16000
+        Volumes:
+          - Host:
+              SourcePath: /opt/miniconda
+            Name: awscli
+        MountPoints:
+          - ContainerPath: /opt/miniconda
+            SourceVolume: awscli
+  
+  BatchJobDefinitionBcftools:
+    Type: "AWS::Batch::JobDefinition"
+    Properties:
+      JobDefinitionName: !Sub ${ProjectLowerCase}-bcftools
+      Type: container #required
+      ContainerProperties:
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectLowerCase}-bcftools
+        Vcpus: 8
+        Memory: 16000
+        Volumes:
+          - Host:
+              SourcePath: /opt/miniconda
+            Name: awscli
+        MountPoints:
+          - ContainerPath: /opt/miniconda
+            SourceVolume: awscli
+
+  # === WORKFLOW DEFININTIONS ===
+  # Creates AWS Step Functions state machines for workflow definitions
+  # Add additional definitions here for any new workflows
+  WorkflowSimple:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        InputDataPrefix: !Sub s3://${SamplesBucket}/${SamplesPrefix}
+        OutputDataPrefix: !Sub s3://${JobResultsBucket}
+        BatchJobDefinitionBwa: !Ref BatchJobDefinitionBwa
+        BatchJobDefinitionSamtools: !Ref BatchJobDefinitionSamtools
+        BatchJobDefinitionBcftools: !Ref BatchJobDefinitionBcftools
+        BatchJobQueue: !GetAtt Batch.Outputs.LowPriorityQueue
+        StatesExecutionRoleArn: !GetAtt IamRoles.Outputs.StatesExecutionRoleArn
+      TemplateURL:
+        Fn::Sub:
+          - "${TemplateRootUrl}/workflow-variantcalling-simple.cfn.yaml"
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/code"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  # === WOFKLOW DASHBOARDS ===
+  # Creates AWS CloudWatch Dashboards for monitoring workflows
+  # Add additional dashboards here for any new workflows
+  DashboardWorkflowSimple:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        StateMachineArn: !GetAtt WorkflowSimple.Outputs.WorkflowArn
+      TemplateURL:
+        Fn::Sub:
+          - "${TemplateRootUrl}/cloudwatch-dashboard.cfn.yaml"
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/code"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+Outputs:
+  JobResultsBucket:
+    Description: Jobs results bucket
+    Value: !Ref JobResultsBucket
+  
+  WorkflowSimpleArn:
+    Description: ARN for Simple variant calling workflow
+    Value: !GetAtt WorkflowSimple.Outputs.WorkflowArn
+  WorkflowSimpleInput:
+    Description: Example input for Simple variant calling workflow
+    Value: !GetAtt WorkflowSimple.Outputs.WorkflowInput
+  DashboardWorkflowSimple:
+    Description: CloudWatch Dashboard for Simple variant calling workflow
+    Value: !GetAtt DashboardWorkflowSimple.Outputs.Dashboard
+
+...

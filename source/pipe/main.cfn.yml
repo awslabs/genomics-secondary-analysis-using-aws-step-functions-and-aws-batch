@@ -1,0 +1,262 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  (SO0076) - Genomics-secondary-analysis-using-aws-step-functions-and-aws-batch: CI/CD Pipeline.
+  Provides AWS resources for developing, building, and deploying workflows
+
+Parameters:
+  Project:
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Type: String
+    Default: genomicsworkflow
+  
+  ZoneStackName:
+    Type: String
+    Default: GenomicsWorkflowZone
+  
+Resources:
+
+  IamRoles:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref Project
+        ProjectLowerCase: !Ref ProjectLowerCase
+        ZoneStackName: !Ref ZoneStackName
+      TemplateURL:
+        Fn::Sub:
+          - ${TemplateRootUrl}/iam.cfn.yaml
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/zone"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  Repo:
+    DeletionPolicy: Retain
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Sub ${Project}Code
+      RepositoryDescription: !Sub ${Project}Code
+
+  SourceEvent:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - CodePipeline
+    Properties:
+      Description: >
+        Rule for Amazon CloudWatch Events to detect changes to the source
+        repository and trigger pipeline execution
+      EventPattern:
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceName:
+            - master
+          referenceType:
+            - branch
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !Sub ${Repo.Arn}
+        source:
+          - aws.codecommit
+      Name: !Sub ${Repo}-Pipeline-Trigger
+      State: ENABLED
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}
+          Id: ProjectPipelineTarget
+          RoleArn: !GetAtt IamRoles.Outputs.SourceEventRoleArn
+
+  BuildCode:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Description: !Sub ${Project}BuildCode
+      Source: #required
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      Name: !Sub ${Project}BuildCode
+      Artifacts: #required
+        Type: CODEPIPELINE
+      ServiceRole: !GetAtt IamRoles.Outputs.CodeBuildRoleArn #required
+      Environment: #required
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:3.0
+        EnvironmentVariables:
+          - Name: ZONE_BUCKET
+            Value:
+              Fn::ImportValue:
+                !Sub ${ZoneStackName}-ZoneBucket 
+
+  StackBuildContainerBwa:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref ProjectLowerCase
+        ImageName: bwa
+        ImageTag: "0.7.17"
+        BuildSpec: ./containers/buildspec.yml
+        ProjectPath: ./containers/bwa
+        CodeBuildRoleArn: !GetAtt IamRoles.Outputs.CodeBuildRoleArn
+        UseProjectPrefix: "yes"
+      TemplateURL:
+        Fn::Sub:
+          - ${TemplateRootUrl}/container-buildproject.cfn.yaml
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/zone"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+  
+  StackBuildContainerSamtools:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref ProjectLowerCase
+        ImageName: samtools
+        ImageTag: "1.9"
+        BuildSpec: ./containers/buildspec.yml
+        ProjectPath: ./containers/samtools
+        CodeBuildRoleArn: !GetAtt IamRoles.Outputs.CodeBuildRoleArn
+        UseProjectPrefix: "yes"
+      TemplateURL:
+        Fn::Sub:
+          - ${TemplateRootUrl}/container-buildproject.cfn.yaml
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/zone"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  StackBuildContainerBcftools:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        Project: !Ref ProjectLowerCase
+        ImageName: bcftools
+        ImageTag: "1.9"
+        BuildSpec: ./containers/buildspec.yml
+        ProjectPath: ./containers/bcftools
+        CodeBuildRoleArn: !GetAtt IamRoles.Outputs.CodeBuildRoleArn
+        UseProjectPrefix: "yes"
+      TemplateURL:
+        Fn::Sub:
+          - ${TemplateRootUrl}/container-buildproject.cfn.yaml
+          - TemplateRootUrl:
+              Fn::Sub:
+                - "https://${ZoneBucket}.s3.${AWS::Region}.amazonaws.com/zone"
+                - ZoneBucket:
+                    Fn::ImportValue:
+                      !Sub ${ZoneStackName}-ZoneBucket
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - Repo
+    Properties:
+      ArtifactStore:
+        Location:
+          Fn::ImportValue:
+            !Sub ${ZoneStackName}-ZoneBucket
+        Type: S3
+      Name: !Sub ${Project}Pipe-CodePipeline
+      RoleArn: !GetAtt IamRoles.Outputs.CodePipelineRoleArn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: CodeCommitRepo
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: "1"
+              Configuration:
+                BranchName: master
+                RepositoryName: !Sub ${Project}Code
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceStageOutput
+        - Name: Build
+          Actions:
+            - Name: Code
+              ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Provider: CodeBuild
+                  Version: "1"
+              Configuration:
+                ProjectName: !Ref BuildCode
+              InputArtifacts:
+                - Name: SourceStageOutput
+            - Name: Bwa
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !GetAtt "StackBuildContainerBwa.Outputs.Name"
+              InputArtifacts:
+              - Name: SourceStageOutput
+            - Name: Samtools
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !GetAtt "StackBuildContainerSamtools.Outputs.Name"
+              InputArtifacts:
+              - Name: SourceStageOutput
+            - Name: Bcftools
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !GetAtt "StackBuildContainerBcftools.Outputs.Name"
+              InputArtifacts:
+              - Name: SourceStageOutput
+        - Name: CreateStack
+          Actions:
+            - Name: CreateStack
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                StackName: !Sub ${Project}Code
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_NAMED_IAM
+                RoleArn: !GetAtt IamRoles.Outputs.CloudFormationRoleArn
+                TemplatePath: SourceStageOutput::main.cfn.yml
+                ParameterOverrides:
+                  Fn::Sub:
+                    - '{ "Project": "${Project}", "ProjectLowerCase": "${ProjectLowerCase}", "SamplesBucket": "${ZoneBucket}",  "SamplesPrefix": "samples", "ZoneStackName": "${ZoneStackName}"}'
+                    - ZoneBucket:
+                        Fn::ImportValue:
+                          !Sub ${ZoneStackName}-ZoneBucket
+              InputArtifacts:
+                - Name: SourceStageOutput
+              OutputArtifacts: []
+
+Outputs:
+  RepoName:
+    Description: RepoName
+    Value: !Sub ${Repo.Name}
+  RepoCloneUrl:
+    Description: RepoUrl
+    Value: !GetAtt Repo.CloneUrlHttp
+    Export:
+      Name: !Sub ${AWS::StackName}-CodeRepo
+...

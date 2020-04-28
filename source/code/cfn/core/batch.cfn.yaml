@@ -1,0 +1,209 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines AWS Batch computing resources for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  
+  BatchServiceRoleArn:
+    Description: IAM role used by AWS Batch to launch resources on your behalf
+    Type: String
+  BatchInstanceProfileArn:
+    Description: IAM role used by AWS Batch launched instances to access resources on your behalf
+    Type: String
+  SpotFleetRoleArn:
+    Description: IAM role used by AWS Batch to make Spot instance requests
+    Type: String
+  
+  SubnetIds:
+    Description: List of SubnetIds for AWS Batch to launch instances into
+    Type: List<AWS::EC2::Subnet::Id>
+  SecurityGroupIds:
+    Description: Security groups used by AWS Batch launched instances
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+  LaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - Ebs:
+              # root volume
+              Encrypted: True
+              DeleteOnTermination: True
+              VolumeSize: 50
+              VolumeType: gp2 
+            DeviceName: /dev/xvda
+          - Ebs:
+              # ecs optimized ami docker storage volume, kept for compatibility
+              Encrypted: True
+              DeleteOnTermination: True
+              VolumeSize: 22
+              VolumeType: gp2 
+            DeviceName: /dev/xvdcz
+          - Ebs:
+              # docker storage volume (amazon-ebs-autoscale managed)
+              Encrypted: True
+              DeleteOnTermination: True
+              VolumeSize: 100
+              VolumeType: gp2 
+            DeviceName: /dev/sdc
+        TagSpecifications:
+          - ResourceType: volume
+            Tags:
+              - Key: Project
+                Value: !Ref Project
+              - Key: SolutionId
+                Value: !FindInMap ['solution', 'metadata', 'id']
+        UserData:
+          Fn::Base64: |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+            --==BOUNDARY==
+            Content-Type: text/cloud-config; charset="us-ascii"
+
+            packages:
+            - jq
+            - btrfs-progs
+            - python27-pip
+            - sed
+            - wget
+            - git
+            - bzip2
+            - amazon-ssm-agent
+
+            runcmd:
+            - pip install -U awscli boto3
+            - start amazon-ssm-agent
+
+            - stop ecs
+            - service docker stop
+
+            # install amazon-ebs-autoscale
+            - cp -au /var/lib/docker /var/lib/docker.bk
+            - rm -rf /var/lib/docker/*
+            - EBS_AUTOSCALE_VERSION=$(curl --silent "https://api.github.com/repos/awslabs/amazon-ebs-autoscale/releases/latest" | jq -r .tag_name)
+            - cd /opt && git clone https://github.com/awslabs/amazon-ebs-autoscale.git
+            - cd /opt/amazon-ebs-autoscale && git checkout $EBS_AUTOSCALE_VERSION
+            - sh /opt/amazon-ebs-autoscale/install.sh /var/lib/docker /dev/sdc 2>&1 > /var/log/ebs-autoscale-install.log
+            - sed -i 's+OPTIONS=.*+OPTIONS="--storage-driver btrfs"+g' /etc/sysconfig/docker-storage
+            - cp -au /var/lib/docker.bk/* /var/lib/docker
+            
+            # install miniconda/awscli
+            - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+            - bash Miniconda3-latest-Linux-x86_64.sh -b -f -p /opt/miniconda
+            - /opt/miniconda/bin/conda install -c conda-forge -y awscli
+            - chown -R ec2-user:ec2-user /opt/miniconda
+            - rm Miniconda3-latest-Linux-x86_64.sh
+
+            - service docker start
+            - start ecs
+
+            --==BOUNDARY==--
+
+  SpotEnv:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ServiceRole: !Ref BatchServiceRoleArn
+      Type: MANAGED
+      State: ENABLED
+      ComputeEnvironmentName: !Sub ${Project}SpotEnv
+      ComputeResources:
+        AllocationStrategy: BEST_FIT
+        LaunchTemplate:
+          LaunchTemplateId: !Ref LaunchTemplate
+        SecurityGroupIds: !Ref SecurityGroupIds
+        BidPercentage: 50
+        InstanceRole: !Ref BatchInstanceProfileArn
+        InstanceTypes:
+          - optimal
+        MinvCpus: 0
+        DesiredvCpus: 0
+        MaxvCpus: 256
+        SpotIamFleetRole: !Ref SpotFleetRoleArn
+        Subnets: !Ref SubnetIds
+        Tags:
+          Name: !Sub ${Project}SpotEnv-Worker
+          Project: !Sub ${Project}
+          SolutionId: !FindInMap ['solution', 'metadata', 'id']
+        Type: SPOT
+
+  OnDemandEnv:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ServiceRole: !Ref BatchServiceRoleArn
+      Type: MANAGED
+      State: ENABLED
+      ComputeEnvironmentName: !Sub ${Project}OnDemandEnv
+      ComputeResources:
+        AllocationStrategy: BEST_FIT
+        LaunchTemplate:
+          LaunchTemplateId: !Ref LaunchTemplate
+        SecurityGroupIds: !Ref SecurityGroupIds
+        InstanceRole: !Ref BatchInstanceProfileArn
+        InstanceTypes:
+          - optimal
+        MinvCpus: 0
+        DesiredvCpus: 0
+        MaxvCpus: 256
+        Subnets: !Ref SubnetIds
+        Tags:
+          Name: !Sub ${Project}OnDemandEnv-Worker
+          Project: !Sub ${Project}
+          SolutionId: !FindInMap ['solution', 'metadata', 'id']
+        Type: EC2
+
+  HighPriorityQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: !Sub ${Project}HighPriority
+      Priority: 1000
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref OnDemandEnv
+
+  LowPriorityQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: !Sub ${Project}LowPriority
+      Priority: 1
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref SpotEnv
+        - Order: 2
+          ComputeEnvironment: !Ref OnDemandEnv
+
+
+Outputs:
+  SpotComputeEnvironment:
+    Value: !Ref SpotEnv
+  OnDemandComputeEnvironment:
+    Value: !Ref OnDemandEnv
+  LowPriorityQueue:
+    Value: !Ref LowPriorityQueue
+  HighPriorityQueue:
+    Value: !Ref HighPriorityQueue
+
+...

@@ -1,0 +1,153 @@
+---
+    AWSTemplateFormatVersion: 2010-09-09
+    
+    Description: >
+      CloudWatch Dashboard for monitoring genomics workflows running on AWS Step
+      Functions and AWS Batch
+    
+    Parameters:
+      StateMachineArn:
+        Description: >
+          AWS Step Functions state machine ARN of the workflow to monitor
+        Type: String
+    
+    Resources:
+      Dashboard:
+        Type: AWS::CloudWatch::Dashboard
+        Properties:
+          DashboardName: !Ref "AWS::StackName"
+          DashboardBody:
+            Fn::Sub:
+              - |-
+                {
+                    "widgets": [
+                        {
+                            "type": "metric",
+                            "x": 9,
+                            "y": 0,
+                            "width": 15,
+                            "height": 6,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionsSucceeded", "StateMachineArn", "${StateMachineArn}" ],
+                                    [ ".", "ExecutionsFailed", ".", "." ],
+                                    [ ".", "ExecutionsTimedOut", ".", "." ]
+                                ],
+                                "view": "timeSeries",
+                                "stacked": false,
+                                "region": "${AWS::Region}",
+                                "title": "Workflow Status",
+                                "period": 3600,
+                                "stat": "Sum"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 6,
+                            "y": 6,
+                            "width": 3,
+                            "height": 6,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionsTimedOut", "StateMachineArn", "${StateMachineArn}" ]
+                                ],
+                                "view": "singleValue",
+                                "region": "${AWS::Region}",
+                                "title": "Timed Out (Month)",
+                                "period": 2592000,
+                                "stat": "Sum"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 3,
+                            "y": 6,
+                            "width": 3,
+                            "height": 6,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionsFailed", "StateMachineArn", "${StateMachineArn}" ]
+                                ],
+                                "view": "singleValue",
+                                "region": "${AWS::Region}",
+                                "title": "Failed (Month)",
+                                "period": 2592000,
+                                "stat": "Sum"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 0,
+                            "y": 6,
+                            "width": 3,
+                            "height": 6,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionsSucceeded", "StateMachineArn", "${StateMachineArn}" ]
+                                ],
+                                "view": "singleValue",
+                                "region": "${AWS::Region}",
+                                "title": "Completed (Month)",
+                                "period": 2592000,
+                                "stat": "Sum"
+                            }
+                        },
+                        {
+                            "type": "log",
+                            "x": 0,
+                            "y": 0,
+                            "width": 9,
+                            "height": 6,
+                            "properties": {
+                                "query": "SOURCE '/aws/batch/job' | fields @message\n| filter @message like /JOB_WORKFLOW_NAME=${StateMachineName}/\n| stats count(*) as runs by @message\n| sort runs desc\n| limit 200",
+                                "region": "${AWS::Region}",
+                                "stacked": false,
+                                "title": "Log group: /aws/batch/job",
+                                "view": "table"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 9,
+                            "y": 6,
+                            "width": 15,
+                            "height": 3,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionTime", "StateMachineArn", "${StateMachineArn}", { "stat": "p95" } ],
+                                    [ "..." ]
+                                ],
+                                "view": "timeSeries",
+                                "stacked": false,
+                                "region": "${AWS::Region}",
+                                "stat": "p50",
+                                "period": 3600,
+                                "title": "Performance - Execution Time"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 9,
+                            "y": 9,
+                            "width": 15,
+                            "height": 3,
+                            "properties": {
+                                "metrics": [
+                                    [ "AWS/States", "ExecutionsStarted", "StateMachineArn", "${StateMachineArn}" ],
+                                    [ "...", { "stat": "p50" } ]
+                                ],
+                                "view": "timeSeries",
+                                "stacked": false,
+                                "region": "${AWS::Region}",
+                                "stat": "p95",
+                                "period": 3600,
+                                "title": "Performance - Count"
+                            }
+                        }
+                    ]
+                }
+              - StateMachineName: !Select [ 6, !Split [ ":", !Ref StateMachineArn ] ]
+    
+    Outputs:
+      Dashboard:
+        Value: !Ref Dashboard
