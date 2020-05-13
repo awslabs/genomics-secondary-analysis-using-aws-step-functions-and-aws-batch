@@ -11,8 +11,8 @@ PROJECT_NAME_LOWER_CASE=`echo "$PROJECT_NAME" | awk '{print tolower($0)}'`
 
 STACKNAME_CODE=${PROJECT_NAME}Code
 
-WORKFLOW_ARN=$(aws cloudformation describe-stacks --stack-name $STACKNAME_CODE --query 'Stacks[].Outputs[?OutputKey==`WorkflowBwaArn`].OutputValue' --output text)
-WORKFLOW_INPUT=$(aws cloudformation describe-stacks --stack-name $STACKNAME_CODE --query 'Stacks[].Outputs[?OutputKey==`WorkflowBwaInput`].OutputValue' --output text)
+WORKFLOW_ARN=$(aws cloudformation describe-stacks --stack-name $STACKNAME_CODE --query 'Stacks[].Outputs[?OutputKey==`WorkflowSimpleArn`].OutputValue' --output text)
+WORKFLOW_INPUT=$(aws cloudformation describe-stacks --stack-name $STACKNAME_CODE --query 'Stacks[].Outputs[?OutputKey==`WorkflowSimpleInput`].OutputValue' --output text)
 
 echo "executing workflow: $WORKFLOW_ARN"
 EXECUTION_ARN=$(\
