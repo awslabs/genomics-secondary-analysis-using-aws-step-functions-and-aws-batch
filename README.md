@@ -1,7 +1,5 @@
 # Genomics Secondary Analysis Using AWS Step Functions and AWS Batch
 
-test
-
 <img src="https://d1.awsstatic.com/Solutions/Solutions%20Category%20Template%20Draft/Solution%20Architecture%20Diagrams/genomics-secondary-analysis-architecture-diagram.102c69721d29289d37ac46615dc602034e69bcc0.png" style="width:75vw">
 
 This solution provides a framework for Next Generation Sequencing (NGS) genomics secondary-analysis pipelines using AWS Step Functions and AWS Batch. It deploys AWS services to develop and run custom workflow pipelines, monitor pipeline status and performance, fail-over to on-demand, handle errors, optimize for cost, and secure data with least-privileges.
