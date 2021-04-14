@@ -116,8 +116,8 @@ Resources:
             - chown -R ec2-user:ec2-user /opt/miniconda
             - rm Miniconda3-latest-Linux-x86_64.sh
 
-            - service docker start
-            - start ecs
+            - systemctl restart docker --no-block
+            - systemctl enable --now --no-block ecs.service
 
             --==BOUNDARY==--
 
