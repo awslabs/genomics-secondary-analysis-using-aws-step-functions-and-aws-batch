@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: crhelper
-Version: 2.0.9
+Version: 2.0.10
 Summary: crhelper simplifies authoring CloudFormation Custom Resources
 Home-page: https://github.com/aws-cloudformation/custom-resource-helper
 Author: Jay McConnell
@@ -54,7 +54,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 # Initialise the helper, all inputs are optional, this example shows the defaults
-helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL', sleep_on_delete=120, ssl_verify=True)
+helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL', sleep_on_delete=120, ssl_verify=None)
 
 try:
     ## Init code goes here

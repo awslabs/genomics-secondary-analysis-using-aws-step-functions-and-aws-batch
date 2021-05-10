@@ -85,19 +85,15 @@ Resources:
             packages:
             - jq
             - btrfs-progs
-            - python27-pip
-            - sed
             - wget
             - git
             - bzip2
-            - amazon-ssm-agent
 
             runcmd:
-            - pip install -U awscli boto3
-            - start amazon-ssm-agent
+            - pip3 install -U awscli boto3
 
-            - stop ecs
-            - service docker stop
+            - systemctl stop ecs
+            - systemctl stop docker
 
             # install amazon-ebs-autoscale
             - cp -au /var/lib/docker /var/lib/docker.bk
@@ -116,8 +112,7 @@ Resources:
             - chown -R ec2-user:ec2-user /opt/miniconda
             - rm Miniconda3-latest-Linux-x86_64.sh
 
-            - service docker start
-            - start ecs
+            - trap "systemctl start docker;systemctl enable --now --no-block ecs" INT ERR EXIT
 
             --==BOUNDARY==--
 

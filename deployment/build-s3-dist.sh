@@ -70,10 +70,11 @@ sed -i '' -e $replace $template_dist_dir/*.template
 
 mkdir $build_dist_dir/samples
 
-wget https://aws-batch-genomics-shared.s3.amazonaws.com/secondary-analysis/example-files/fastq/NIST7035_R1_trim_samp-0p1.fastq.gz
+echo "Downloading sample files."
+wget https://genomics-solutions-shared-assets.s3-us-west-2.amazonaws.com/secondary-analysis/example-files/fastq/NIST7035_R1_trim_samp-0p1.fastq.gz .
 cp NIST7035_R1_trim_samp-0p1.fastq.gz $build_dist_dir/samples/NIST7035_R1_trim_samp-0p1.fastq.gz
  
-wget https://aws-batch-genomics-shared.s3.amazonaws.com/secondary-analysis/example-files/fastq/NIST7035_R2_trim_samp-0p1.fastq.gz
+wget https://genomics-solutions-shared-assets.s3-us-west-2.amazonaws.com/secondary-analysis/example-files/fastq/NIST7035_R2_trim_samp-0p1.fastq.gz .
 cp NIST7035_R2_trim_samp-0p1.fastq.gz $build_dist_dir/samples/NIST7035_R2_trim_samp-0p1.fastq.gz
  
 echo "------------------------------------------------------------------------------"

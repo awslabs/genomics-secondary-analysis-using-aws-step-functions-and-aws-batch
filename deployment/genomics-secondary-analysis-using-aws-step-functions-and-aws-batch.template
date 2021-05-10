@@ -69,6 +69,10 @@ Resources:
         rules_to_suppress:
           - id: W58
             reason: Bug in CfnNag.
+          - id: W89
+            reason: Just used to launch solution.
+          - id: W92
+            reason: Concurrent executions unnecessary.
 
   SetupLambdaRole:
     Type: AWS::IAM::Role
