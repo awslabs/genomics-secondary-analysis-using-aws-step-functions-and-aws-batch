@@ -123,6 +123,7 @@ Resources:
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:natgateway/*
               - Effect: Allow
                 Action:
                   - ec2:DeleteVpcEndpoints
