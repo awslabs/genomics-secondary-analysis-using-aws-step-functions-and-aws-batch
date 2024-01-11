@@ -1,3 +1,7 @@
+# Deprecation Notice
+
+In 2022, AWS launched AWS HealthOmics, a purpose built service to store, query and analyze genomics and other omics data securely and at scale. Since HealthOmics allows users to run bioinformatics workflows using industry specific workflow languages and abstracts the AWS infrastructure and its management from the user, we recommend using AWS HealthOmics. An updated guidance is available here: https://aws.amazon.com/solutions/guidance/development-automation-implementation-monitoring-of-bioinformatics-workflows-on-aws/
+
 # Genomics Secondary Analysis Using AWS Step Functions and AWS Batch
 
 <img src="https://d1.awsstatic.com/Solutions/Solutions%20Category%20Template%20Draft/Solution%20Architecture%20Diagrams/genomics-secondary-analysis-architecture-diagram.102c69721d29289d37ac46615dc602034e69bcc0.png" style="width:75vw">
